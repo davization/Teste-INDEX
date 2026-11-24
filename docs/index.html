@@ -1,134 +1,112 @@
-#!/usr/bin/env python3
-"""Coleta diária de indexadores globais de matérias-primas e grava docs/data.json.
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Indexadores Globais de Matérias-Primas</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>tailwind.config={darkMode:'class'}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+body{font-family:Georgia,'Times New Roman',serif}
+.ui,button,input,select,label{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.num{font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid #0f766e;outline-offset:2px}
+</style>
+</head>
+<body class="bg-stone-100 text-stone-900 dark:bg-stone-900 dark:text-stone-100">
+<header class="border-b border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center gap-3 justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">Indexadores globais de matérias-primas</h1>
+      <p class="ui text-sm text-stone-500 dark:text-stone-400">Atualizado em <span id="gen" class="num font-medium">–</span> · <span id="cnt"></span></p>
+    </div>
+    <button id="btnTheme" class="ui px-3 py-2 rounded border border-stone-400 dark:border-stone-600 text-sm hover:bg-stone-100 dark:hover:bg-stone-800">Claro / Escuro</button>
+  </div>
+</header>
+<main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+  <nav id="tabs" class="ui flex flex-wrap gap-2 text-sm"></nav>
+  <div id="kpis" class="space-y-6"></div>
 
-Fontes públicas:
-  - FRED (St. Louis Fed, espelha o Pink Sheet do Banco Mundial): energia, metais, agrícolas. Exige FRED_API_KEY (gratuita).
-  - Ipeadata: Brent diário (sem chave).
-  - Frankfurter (BCE): câmbio USD/BRL, EUR/BRL, USD/CNY (sem chave).
-  - BCB SGS: IPCA e IGP-M (sem chave).
-Se uma série falhar, mantém a última versão salva e marca como "stale".
-"""
-import datetime as dt
-import json
-import os
-import sys
+  <section class="bg-white dark:bg-stone-800 rounded-lg p-4 border border-stone-200 dark:border-stone-700">
+    <div class="flex flex-wrap items-end justify-between gap-3 mb-3">
+      <div>
+        <h2 class="text-xl font-bold">Comparativo em Base 100</h2>
+        <p class="ui text-sm text-stone-500 dark:text-stone-400">Marque os cards para sobrepor séries. Cada série parte de 100 no início do período.</p>
+      </div>
+      <label class="ui text-sm">Período
+        <select id="win" class="ml-1 px-2 py-1 rounded border border-stone-400 dark:border-stone-600 bg-white dark:bg-stone-900">
+          <option value="90">90 dias</option><option value="180">6 meses</option><option value="365" selected>1 ano</option><option value="730">2 anos</option><option value="1825">5 anos</option>
+        </select>
+      </label>
+    </div>
+    <div class="relative h-96"><canvas id="chart"></canvas></div>
+  </section>
+</main>
 
-import requests
+<script>
+const $=s=>document.querySelector(s),DAY=864e5;
+const LS=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
+const SV=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
+const nf=(v,d)=>v.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d});
+const PAL=['#d97706','#059669','#2563eb','#db2777','#0d9488','#7c3aed','#ea580c','#64748b','#ca8a04','#dc2626','#0891b2','#65a30d'];
+let DATA,cat='Todas',sel=new Set(LS('sel',['BRENT','USDBRL','PCOPPUSDM','PSOYBUSDM'])),chart;
 
-OUT = "docs/data.json"
-KEY = os.getenv("FRED_API_KEY")
-TODAY = dt.date.today()
-S = requests.Session()
-S.headers["User-Agent"] = "commodities-dashboard/1.0"
+const pct=(a,b)=>b?(a-b)/Math.abs(b)*100:null;
+const col=v=>v==null||Math.abs(v)<.005?'text-stone-500 dark:text-stone-400':v>0?'text-red-600 dark:text-red-400':'text-emerald-600 dark:text-emerald-400';
+const fmt=(v,pp)=>v==null?'—':(v>0?'▲ +':v<0?'▼ ':'')+nf(v,2)+(pp?' p.p.':'%');
+const dec=s=>{const v=s.points[s.points.length-1][1];return v<10?3:v<1000?2:0};
 
-
-def get(url, **params):
-    r = S.get(url, params=params, timeout=30)
-    r.raise_for_status()
-    return r.json()
-
-
-def ms(d):
-    return int(dt.datetime.fromisoformat(d[:10]).replace(tzinfo=dt.timezone.utc).timestamp() * 1000)
-
-
-def fred(sid, years=5):
-    if not KEY:
-        raise RuntimeError("FRED_API_KEY ausente")
-    j = get("https://api.stlouisfed.org/fred/series/observations", series_id=sid, api_key=KEY,
-            file_type="json", observation_start=str(TODAY - dt.timedelta(days=365 * years)))
-    return [[ms(o["date"]), float(o["value"])] for o in j["observations"] if o["value"] not in (".", "")]
-
-
-def ipea(code, top=1300):
-    j = get(f"https://www.ipeadata.gov.br/api/odata4/ValoresSerie(SERCODIGO='{code}')",
-            **{"$orderby": "VALDATA desc", "$top": str(top)})
-    return sorted([ms(x["VALDATA"]), float(x["VALVALOR"])] for x in j["value"] if x["VALVALOR"] is not None)
-
-
-def fx(base, sym):
-    j = get(f"https://api.frankfurter.dev/v1/{TODAY - dt.timedelta(days=730)}..{TODAY}", base=base, symbols=sym)
-    return sorted([ms(d), r[sym]] for d, r in j["rates"].items())
-
-
-def bcb(code, n=36):
-    j = get(f"https://api.bcb.gov.br/dados/serie/bcdata.sgs.{code}/dados/ultimos/{n}", formato="json")
-    return [[ms("-".join(reversed(x["data"].split("/")))), float(x["valor"])] for x in j]
-
-
-# (id, nome, categoria, unidade, frequência, função de coleta)
-F = lambda sid: (lambda: fred(sid))
-JOBS = [
-    # Energia
-    ("BRENT", "Petróleo Brent", "Energia", "US$/bbl", "diária", lambda: ipea("EIA366_PBRENT366")),
-    ("DCOILWTICO", "Petróleo WTI", "Energia", "US$/bbl", "diária", F("DCOILWTICO")),
-    ("DHHNGSP", "Gás natural Henry Hub", "Energia", "US$/MMBtu", "diária", F("DHHNGSP")),
-    ("PNGASEUUSDM", "Gás natural Europa", "Energia", "US$/MMBtu", "mensal", F("PNGASEUUSDM")),
-    ("PCOALAUUSDM", "Carvão (Austrália)", "Energia", "US$/t", "mensal", F("PCOALAUUSDM")),
-    ("PURANUSDM", "Urânio", "Energia", "US$/lb", "mensal", F("PURANUSDM")),
-    # Metais
-    ("PCOPPUSDM", "Cobre", "Metais", "US$/t", "mensal", F("PCOPPUSDM")),
-    ("PALUMUSDM", "Alumínio", "Metais", "US$/t", "mensal", F("PALUMUSDM")),
-    ("PNICKUSDM", "Níquel", "Metais", "US$/t", "mensal", F("PNICKUSDM")),
-    ("PZINCUSDM", "Zinco", "Metais", "US$/t", "mensal", F("PZINCUSDM")),
-    ("PLEADUSDM", "Chumbo", "Metais", "US$/t", "mensal", F("PLEADUSDM")),
-    ("PTINUSDM", "Estanho", "Metais", "US$/t", "mensal", F("PTINUSDM")),
-    ("PIORECRUSDM", "Minério de ferro", "Metais", "US$/t", "mensal", F("PIORECRUSDM")),
-    # Agrícolas e fibras
-    ("PWHEAMTUSDM", "Trigo", "Agrícolas", "US$/t", "mensal", F("PWHEAMTUSDM")),
-    ("PMAIZMTUSDM", "Milho", "Agrícolas", "US$/t", "mensal", F("PMAIZMTUSDM")),
-    ("PSOYBUSDM", "Soja", "Agrícolas", "US$/t", "mensal", F("PSOYBUSDM")),
-    ("PRICENPQUSDM", "Arroz", "Agrícolas", "US$/t", "mensal", F("PRICENPQUSDM")),
-    ("PSUGAISAUSDM", "Açúcar", "Agrícolas", "US¢/lb", "mensal", F("PSUGAISAUSDM")),
-    ("PCOFFOTMUSDM", "Café arábica", "Agrícolas", "US¢/lb", "mensal", F("PCOFFOTMUSDM")),
-    ("PCOTTINDUSDM", "Algodão", "Agrícolas", "US¢/lb", "mensal", F("PCOTTINDUSDM")),
-    ("PRUBBUSDM", "Borracha", "Agrícolas", "US¢/lb", "mensal", F("PRUBBUSDM")),
-    ("PPOILUSDM", "Óleo de palma", "Agrícolas", "US$/t", "mensal", F("PPOILUSDM")),
-    # Câmbio
-    ("USDBRL", "Dólar (USD/BRL)", "Câmbio", "R$", "diária", lambda: fx("USD", "BRL")),
-    ("EURBRL", "Euro (EUR/BRL)", "Câmbio", "R$", "diária", lambda: fx("EUR", "BRL")),
-    ("USDCNY", "Dólar/Yuan (USD/CNY)", "Câmbio", "CNY", "diária", lambda: fx("USD", "CNY")),
-    # Inflação Brasil (BCB SGS)
-    ("IPCA", "IPCA (mês)", "Inflação BR", "%", "mensal", lambda: bcb(433)),
-    ("IPCA12M", "IPCA (acum. 12m)", "Inflação BR", "%", "mensal", lambda: bcb(13522)),
-    ("IGPM", "IGP-M (mês)", "Inflação BR", "%", "mensal", lambda: bcb(189)),
-    ("IPAM", "IPA-M (Produtor BR)", "Inflação BR", "%", "mensal", lambda: bcb(225)),
-    ("INPC", "INPC (mês)", "Inflação BR", "%", "mensal", lambda: bcb(188)),
-    # Inflação EUA (FRED)
-    ("CPIAUCSL", "CPI EUA (Inflação Geral)", "Inflação EUA", "pts", "mensal", F("CPIAUCSL")),
-    ("CPILFESL", "Core CPI EUA (Núcleo)", "Inflação EUA", "pts", "mensal", F("CPILFESL")),
-    ("PPIACO", "PPI EUA (Preços ao Produtor)", "Inflação EUA", "pts", "mensal", F("PPIACO")),
-    ("PCEPI", "PCE EUA (Índice do Fed)", "Inflação EUA", "pts", "mensal", F("PCEPI")),
-    # Logística
-    ("DDFUELUSGULF", "Diesel Golfo EUA (Paridade)", "Logística", "US$/gal", "diária", F("DDFUELUSGULF")),
-    ("PCU483111483111", "Frete Marítimo (PPI)", "Logística", "pts", "mensal", F("PCU483111483111")),
-
-def main():
-    old = {}
-    if os.path.exists(OUT):
-        with open(OUT, encoding="utf-8") as f:
-            old = {s["id"]: s for s in json.load(f).get("series", [])}
-    series, errors = [], []
-    for sid, name, cat, unit, freq, fn in JOBS:
-        try:
-            pts = fn()
-            if not pts:
-                raise ValueError("série vazia")
-            series.append(dict(id=sid, name=name, cat=cat, unit=unit, freq=freq, stale=False, points=pts[-520:]))
-        except Exception as e:  # uma fonte fora do ar não derruba as demais
-            errors.append(f"{sid}: {e}")
-            if sid in old:
-                series.append({**old[sid], "stale": True})
-    print(f"{len(series)}/{len(JOBS)} séries OK")
-    for e in errors:
-        print("ERRO", e, file=sys.stderr)
-    if not any(not s["stale"] for s in series):
-        sys.exit("Nenhuma série atualizada; nada foi gravado.")
-    os.makedirs("docs", exist_ok=True)
-    with open(OUT, "w", encoding="utf-8") as f:
-        json.dump({"generated_at": dt.datetime.now(dt.timezone.utc).isoformat(), "errors": errors,
-                   "series": series}, f, separators=(",", ":"), ensure_ascii=False)
-
-
-if __name__ == "__main__":
-    main()
+function stats(s){
+  const p=s.points,l=p[p.length-1],pr=p[p.length-2];
+  if(s.unit==='%')return{l,d:null,m:pr?l[1]-pr[1]:null,pp:true};
+  const tg=l[0]-30*DAY,ref=p.length>1?p.reduce((a,b)=>Math.abs(b[0]-tg)<Math.abs(a[0]-tg)?b:a):null;
+  return{l,d:pr?pct(l[1],pr[1]):null,m:ref&&ref!==l?pct(l[1],ref[1]):null};
+}
+function renderTabs(){
+  const cats=['Todas',...new Set(DATA.series.map(s=>s.cat))];
+  $('#tabs').innerHTML=cats.map(c=>`<button data-c="${c}" class="px-3 py-1.5 rounded border ${c===cat?'bg-teal-700 text-white border-teal-700':'border-stone-400 dark:border-stone-600 hover:bg-stone-200 dark:hover:bg-stone-800'}">${c}</button>`).join('');
+  $('#tabs').querySelectorAll('button').forEach(b=>b.onclick=()=>{cat=b.dataset.c;renderTabs();renderKpis()});
+}
+function renderKpis(){
+  const groups={};DATA.series.filter(s=>cat==='Todas'||s.cat===cat).forEach(s=>(groups[s.cat]??=[]).push(s));
+  $('#kpis').innerHTML=Object.entries(groups).map(([g,list])=>`
+    <div><h2 class="text-lg font-bold mb-2">${g}</h2>
+    <div class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-5">${list.map(s=>{
+      const t=stats(s),d=dec(s),on=sel.has(s.id);
+      return`<label class="ui block cursor-pointer bg-white dark:bg-stone-800 rounded-lg p-4 border ${on?'border-teal-600 ring-1 ring-teal-600':'border-stone-200 dark:border-stone-700'}">
+        <div class="flex items-start justify-between gap-2"><span class="font-semibold leading-tight">${s.name}</span><input type="checkbox" data-id="${s.id}" ${on?'checked':''}></div>
+        <div class="text-[11px] mt-1 text-stone-500 dark:text-stone-400">${s.freq} · ${s.stale?'<span class="px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200">Desatualizado</span>':'<span class="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200">API</span>'}</div>
+        <div class="num text-2xl font-bold mt-2">${nf(t.l[1],s.unit==='%'?2:d)} <span class="text-xs font-normal text-stone-500">${s.unit}</span></div>
+        <div class="text-xs text-stone-500 dark:text-stone-400">${new Date(t.l[0]).toLocaleDateString('pt-BR')}</div>
+        <div class="num text-sm mt-2 flex justify-between"><span class="text-stone-500">Dia</span><span class="${col(t.d)}">${t.pp?'—':fmt(t.d)}</span></div>
+        <div class="num text-sm flex justify-between"><span class="text-stone-500">${t.pp?'vs. mês ant.':'Mês'}</span><span class="${col(t.m)}">${fmt(t.m,t.pp)}</span></div></label>`}).join('')}</div></div>`).join('');
+  $('#kpis').querySelectorAll('input').forEach(i=>i.onchange=()=>{i.checked?sel.add(i.dataset.id):sel.delete(i.dataset.id);SV('sel',[...sel]);renderKpis();renderChart()});
+}
+function renderChart(){
+  const dark=document.documentElement.classList.contains('dark'),w=+$('#win').value*DAY;
+  const ds=DATA.series.filter(s=>sel.has(s.id)&&s.unit!=='%').map(s=>{
+    const end=s.points[s.points.length-1][0],p=s.points.filter(x=>x[0]>=end-w);if(!p.length)return null;
+    const c=PAL[DATA.series.indexOf(s)%PAL.length],b=p[0][1];
+    return{label:s.name,data:p.map(x=>({x:x[0],y:x[1]/b*100})),borderColor:c,backgroundColor:c,borderWidth:2,tension:.2,pointRadius:p.length<40?3:0};
+  }).filter(Boolean);
+  if(chart)chart.destroy();
+  const tc=dark?'#d6d3d1':'#44403c',gc=dark?'#44403c':'#e7e5e4';
+  chart=new Chart($('#chart'),{type:'line',data:{datasets:ds},options:{responsive:true,maintainAspectRatio:false,parsing:false,
+    interaction:{mode:'nearest',intersect:false,axis:'x'},
+    scales:{x:{type:'linear',ticks:{color:tc,maxTicksLimit:8,callback:v=>new Date(v).toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})},grid:{color:gc}},
+            y:{ticks:{color:tc},grid:{color:gc},title:{display:true,text:'Base 100',color:tc}}},
+    plugins:{legend:{labels:{color:tc}},tooltip:{callbacks:{title:i=>new Date(i[0].parsed.x).toLocaleDateString('pt-BR'),label:c=>`${c.dataset.label}: ${nf(c.parsed.y,1)}`}}}}});
+}
+function setTheme(d){document.documentElement.classList.toggle('dark',d);SV('dark',d)}
+$('#btnTheme').onclick=()=>{setTheme(!document.documentElement.classList.contains('dark'));if(DATA)renderChart()};
+$('#win').onchange=()=>DATA&&renderChart();
+setTheme(LS('dark',matchMedia('(prefers-color-scheme: dark)').matches));
+fetch('data.json?'+Date.now()).then(r=>r.json()).then(j=>{
+  DATA=j;$('#gen').textContent=new Date(j.generated_at).toLocaleString('pt-BR');
+  $('#cnt').textContent=`${j.series.length} séries`+(j.errors.length?` · ${j.errors.length} com falha na última coleta`:'');
+  renderTabs();renderKpis();renderChart();
+}).catch(()=>{$('#kpis').innerHTML='<p class="ui text-red-600">Não foi possível carregar data.json. Rode o workflow uma vez e abra via GitHub Pages ou servidor local.</p>'});
+</script>
+</body>
+</html>
