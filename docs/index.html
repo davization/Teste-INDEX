@@ -29,6 +29,11 @@ body{font-family:Georgia,'Times New Roman',serif}
   <a href="negociacao.html" class="px-4 py-2.5 border-b-2 border-transparent text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100">Mesa de negociação</a>
 </div></nav>
 <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+  <section id="brief" class="hidden bg-white dark:bg-stone-800 rounded-lg p-4 border border-stone-200 dark:border-stone-700 border-l-4 border-l-teal-700">
+    <div class="flex flex-wrap items-baseline justify-between gap-2"><h2 class="text-lg font-bold">Resumo do dia</h2><span id="briefMeta" class="ui text-xs text-stone-500 dark:text-stone-400"></span></div>
+    <div id="briefText" class="mt-2 space-y-2 leading-relaxed"></div>
+    <p class="ui text-xs text-stone-500 dark:text-stone-400 mt-3">Texto gerado automaticamente a partir dos dados abaixo. Confira os números nos cards antes de decidir.</p>
+  </section>
   <nav id="tabs" class="ui flex flex-wrap gap-2 text-sm"></nav>
   <div id="kpis" class="space-y-6"></div>
 
@@ -112,6 +117,13 @@ fetch('data.json?'+Date.now()).then(r=>r.json()).then(j=>{
   $('#cnt').textContent=`${j.series.length} séries`+(j.errors.length?` · ${j.errors.length} com falha na última coleta`:'');
   renderTabs();renderKpis();renderChart();
 }).catch(()=>{$('#kpis').innerHTML='<p class="ui text-red-600">Não foi possível carregar data.json. Rode o workflow uma vez e abra via GitHub Pages ou servidor local.</p>'});
+fetch('brief.json?'+Date.now()).then(r=>r.ok?r.json():null).then(b=>{
+  if(!b||!b.text)return;
+  $('#briefText').innerHTML='';
+  b.text.split(/\n\n+/).forEach(t=>{const p=document.createElement('p');p.textContent=t;$('#briefText').appendChild(p)});
+  $('#briefMeta').textContent=(b.mode==='ia'?'Redigido por IA ('+b.model+')':'Resumo automático por regras')+' · '+new Date(b.generated_at).toLocaleString('pt-BR');
+  $('#brief').classList.remove('hidden');
+}).catch(()=>{});
 </script>
 </body>
 </html>
