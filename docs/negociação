@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Mesa de Negociação · Compras</title>
+<script src="https://cdn.tailwindcss.com/3.4.17"></script>
+<script>tailwind.config={darkMode:'class'}</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+body{font-family:Georgia,'Times New Roman',serif}
+.ui,button,input,select,label,table{font-family:system-ui,-apple-system,'Segoe UI',sans-serif}
+.num{font-variant-numeric:tabular-nums}
+:focus-visible{outline:2px solid #0f766e;outline-offset:2px}
+@media print{.noprint{display:none!important}body{background:#fff!important;color:#000!important}}
+</style>
+</head>
+<body class="bg-stone-100 text-stone-900 dark:bg-stone-900 dark:text-stone-100">
+<header class="noprint border-b border-stone-300 dark:border-stone-700 bg-white dark:bg-stone-950">
+  <div class="max-w-7xl mx-auto px-4 py-4 flex flex-wrap items-center gap-3 justify-between">
+    <div>
+      <h1 class="text-2xl font-bold">Mesa de negociação</h1>
+      <p class="ui text-sm text-stone-500 dark:text-stone-400">Reajuste paramétrico, should cost e sinal de mercado. 🔒 Seus dados ficam só neste navegador. <a href="index.html" class="underline">Ver indexadores</a></p>
+    </div>
+    <div class="ui flex flex-wrap items-center gap-2 text-sm">
+      <select id="prof" class="px-2 py-2 rounded border border-stone-400 dark:border-stone-600 bg-white dark:bg-stone-900"></select>
+      <button id="bNew" class="px-3 py-2 rounded bg-teal-700 hover:bg-teal-800 text-white">Nova negociação</button>
+      <button id="bDel" class="px-3 py-2 rounded border border-stone-400 dark:border-stone-600">Excluir</button>
+      <button id="bExp" class="px-3 py-2 rounded border border-stone-400 dark:border-stone-600">Exportar backup</button>
+      <label class="px-3 py-2 rounded border border-stone-400 dark:border-stone-600 cursor-pointer">Importar<input id="bImp" type="file" accept=".json" class="hidden"></label>
+      <button id="bTheme" class="px-3 py-2 rounded border border-stone-400 dark:border-stone-600">Claro / Escuro</button>
+    </div>
+  </div>
+</header>
+<main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+  <div id="warn" class="noprint ui hidden text-sm rounded p-3 bg-amber-100 text-amber-900 dark:bg-amber-900 dark:text-amber-100">Não consegui ler o data.json (abra pelo link do GitHub Pages). Só índices manuais estarão disponíveis.</div>
+
+  <section class="noprint bg-white dark:bg-stone-800 rounded-lg p-4 border border-stone-200 dark:border-stone-700">
+    <h2 class="text-xl font-bold mb-1">1. Contrato</h2>
+    <p class="ui text-sm text-stone-500 dark:text-stone-400 mb-3">Valores de exemplo: substitua pelos do seu contrato.</p>
+    <div id="params" class="ui grid gap-3 grid-cols-2 md:grid-cols-4 lg:grid-cols-7 text-sm"></div>
+  </section>
+
+  <section class="noprint bg-white dark:bg-stone-800 rounded-lg p-4 border border-stone-200 dark:border-stone-700">
+    <div class="flex flex-wrap justify-between items-end gap-2 mb-3">
+      <div><h2 class="text-xl font-bold">2. Cost breakdown e vínculo com índices</h2>
+      <p class="ui text-sm text-stone-500 dark:text-stone-400">Informe o custo de cada linha por unidade. Os pesos da fórmula saem daqui.</p></div>
+      <button id="bAdd" class="ui px-3 py-1.5 rounded border border-stone-400 dark:border-stone-600 text-sm">+ Adicionar linha</button>
+    </div>
+    <div class="overflow-x-auto"><table class="w-full text-sm min-w-[900px]">
+      <thead><tr class="text-left text-stone-500 dark:text-stone-400 border-b border-stone-300 dark:border-stone-600">
+        <th class="py-2 pr-2">Linha</th><th class="pr-2">Custo base (R$/un)</th><th class="pr-2">Peso</th><th class="pr-2">Índice</th><th class="pr-2">Base</th><th class="pr-2">Atual</th><th class="pr-2">Var.</th><th class="pr-2">Mercado</th><th class="pr-2">+10% no índice</th><th></th></tr></thead>
+      <tbody id="tb"></tbody></table></div>
+  </section>
+
+  <section id="kpis" class="grid gap-3 grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 ui"></section>
+
+  <section class="noprint bg-white dark:bg-stone-800 rounded-lg p-4 border border-stone-200 dark:border-stone-700">
+    <h2 class="text-xl font-bold">3. Backtest da fórmula</h2>
+    <p class="ui text-sm text-stone-500 dark:text-stone-400 mb-2">Quanto o preço teria variado desde a data-base. Linhas manuais ficam no valor atual informado, pois não há histórico.</p>
+    <div class="relative h-72"><canvas id="chart"></canvas></div>
+  </section>
+
+  <section class="bg-white dark:bg-stone-800 rounded-lg p-4 border border-stone-200 dark:border-stone-700">
+    <div class="noprint flex justify-between items-center mb-2"><h2 class="text-xl font-bold">4. Ficha de negociação</h2>
+      <div class="ui flex gap-2 text-sm"><button id="bCopy" class="px-3 py-1.5 rounded border border-stone-400 dark:border-stone-600">Copiar texto</button><button id="bPrint" class="px-3 py-1.5 rounded bg-teal-700 text-white">Imprimir / PDF</button></div></div>
+    <div id="ficha" class="text-[15px] leading-relaxed space-y-3"></div>
+  </section>
+</main>
+
+<script>
+const $=s=>document.querySelector(s),DAY=864e5;
+const LS=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))??d}catch{return d}};
+const SV=(k,v)=>{try{localStorage.setItem(k,JSON.stringify(v))}catch{}};
+const nf=(v,d=2)=>isFinite(v)?v.toLocaleString('pt-BR',{minimumFractionDigits:d,maximumFractionDigits:d}):'—';
+const brl=v=>'R$ '+nf(v,2), sg=v=>(v>0?'+':'')+nf(v,1)+'%';
+const col=v=>Math.abs(v)<.005?'':v>0?'text-red-600 dark:text-red-400':'text-emerald-600 dark:text-emerald-400';
+const iso=t=>new Date(t).toISOString().slice(0,10);
+const IN='num w-full px-2 py-1 rounded border border-stone-400 dark:border-stone-600 bg-white dark:bg-stone-900';
+let S={},chart,ST=LS('neg',null);
+const DEF=()=>({supplier:'Fornecedor exemplo',base:iso(Date.now()-365*DAY),p0:12,claim:12.9,avg:3,trig:3,cap:0,lines:[
+ {n:'Óleo básico Gr. I/II',c:7,ix:'MAN',b:1000,v:1100},{n:'Aditivos (importados)',c:1.5,ix:'USDBRL'},
+ {n:'Embalagem (PEAD)',c:1,ix:'MAN',b:1000,v:1050},{n:'Frete',c:.5,ix:'MAN',b:100,v:110},
+ {n:'Conversão e mão de obra',c:.6,ix:'FIX'},{n:'Margem e despesas',c:.9,ix:'FIX'}]});
+if(!ST||!ST.items||!ST.items[ST.cur])ST={cur:'Exemplo',items:{Exemplo:DEF()}};
+const IT=()=>ST.items[ST.cur], save=()=>SV('neg',ST);
+
+function valAt(s,t,m){const p=s.points;let w=p.filter(x=>x[0]<=t&&x[0]>t-m*30*DAY);
+  if(!w.length)w=p.filter(x=>x[0]<=t).slice(-1);if(!w.length)w=[p[0]];return w.reduce((a,x)=>a+x[1],0)/w.length}
+const pctl=s=>{const v=s.points[s.points.length-1][1];return s.points.filter(p=>p[1]<=v).length/s.points.length*100};
+const var3m=s=>{const p=s.points,l=p[p.length-1],t=l[0]-90*DAY,r=p.reduce((a,b)=>Math.abs(b[0]-t)<Math.abs(a[0]-t)?b:a);return r===l?null:(l[1]-r[1])/r[1]*100};
+
+function calc(it){
+  const bt=new Date(it.base+'T12:00:00').getTime(),now=Date.now(),tot=it.lines.reduce((a,l)=>a+(+l.c||0),0);
+  const rows=it.lines.map(l=>{const x={...l,w:tot?(+l.c||0)/tot:0,r:1,auto:false};
+    if(l.ix==='MAN'){x.b=+l.b;x.v=+l.v;x.r=x.b>0&&x.v>0?x.v/x.b:1}
+    else if(l.ix!=='FIX'&&S[l.ix]){x.ser=S[l.ix];x.b=valAt(x.ser,bt,it.avg);x.v=valAt(x.ser,now,it.avg);x.r=x.v/x.b;x.auto=true}
+    return x});
+  const f=rows.reduce((a,x)=>a+x.w*x.r,0);
+  let fc=Math.abs(f-1)*100<it.trig?1:f; if(it.cap>0)fc=Math.min(fc,1+it.cap/100);
+  const au=rows.filter(x=>x.auto),aw=au.reduce((a,x)=>a+x.w,0);
+  const sig=aw?au.reduce((a,x)=>a+x.w*pctl(x.ser),0)/aw:null;
+  return{rows,tot,f,fc,devido:it.p0*fc,should:tot*f,sig,bt,now};
+}
+const sigTxt=s=>s==null?'Sem índices automáticos':s>=75?`Mercado caro (P${nf(s,0)})`:s<=25?`Janela favorável (P${nf(s,0)})`:`Neutro (P${nf(s,0)})`;
+
+function opts(sel){return `<option value="FIX" ${sel==='FIX'?'selected':''}>Fixo (sem reajuste)</option><option value="MAN" ${sel==='MAN'?'selected':''}>Manual</option>`+
+  Object.values(S).map(s=>`<option value="${s.id}" ${sel===s.id?'selected':''}>${s.name}</option>`).join('')}
+function buildParams(){const it=IT();
+  const f=(k,l,t='number',x='')=>`<label class="block ${x}">${l}<input data-p="${k}" type="${t}" step="any" value="${it[k]}" class="${IN} mt-1"></label>`;
+  $('#params').innerHTML=f('supplier','Fornecedor','text','col-span-2')+f('base','Data-base','date')+f('p0','Preço atual (R$/un)')+f('claim','Pedido do fornecedor (R$/un)')+
+   `<label class="block">Média dos índices<select data-p="avg" class="${IN} mt-1">${[1,3,6].map(m=>`<option value="${m}" ${it.avg==m?'selected':''}>${m} ${m>1?'meses':'mês'}</option>`).join('')}</select></label>`+
+   f('trig','Gatilho mínimo (%)')+f('cap','Teto de reajuste (%, 0 = sem)');
+  $('#params').querySelectorAll('[data-p]').forEach(e=>e.oninput=()=>{const k=e.dataset.p;it[k]=e.type==='number'||k==='avg'?+e.value:e.value;save();refresh()});
+}
+function buildTable(){const it=IT();
+  $('#tb').innerHTML=it.lines.map((l,i)=>`<tr class="border-b border-stone-200 dark:border-stone-700">
+   <td class="py-1.5 pr-2"><input data-i="${i}" data-f="n" value="${l.n}" class="${IN}"></td>
+   <td class="pr-2 w-28"><input data-i="${i}" data-f="c" type="number" step="any" value="${l.c}" class="${IN}"></td>
+   <td class="pr-2 num" id="w${i}"></td>
+   <td class="pr-2"><select data-i="${i}" data-f="ix" class="${IN}">${opts(l.ix)}</select></td>
+   ${l.ix==='MAN'?`<td class="pr-2 w-24"><input data-i="${i}" data-f="b" type="number" step="any" value="${l.b??''}" class="${IN}"></td><td class="pr-2 w-24"><input data-i="${i}" data-f="v" type="number" step="any" value="${l.v??''}" class="${IN}"></td>`:`<td class="pr-2 num" id="b${i}">—</td><td class="pr-2 num" id="v${i}">—</td>`}
+   <td class="pr-2 num" id="r${i}"></td><td class="pr-2 text-xs" id="m${i}"></td><td class="pr-2 num" id="t${i}"></td>
+   <td><button data-del="${i}" class="text-stone-400 hover:text-red-600" aria-label="Remover linha">✕</button></td></tr>`).join('');
+  $('#tb').querySelectorAll('[data-f]').forEach(e=>{const i=+e.dataset.i,f=e.dataset.f;
+    e.oninput=()=>{it.lines[i][f]=(f==='n'||f==='ix')?e.value:+e.value;save();if(f==='ix'){buildTable()}refresh()}});
+  $('#tb').querySelectorAll('[data-del]').forEach(b=>b.onclick=()=>{it.lines.splice(+b.dataset.del,1);save();buildTable();refresh()});
+  refresh();
+}
+const set=(id,h)=>{const e=$(id);if(e)e.innerHTML=h};
+function refresh(){const it=IT(),R=calc(it);
+  R.rows.forEach((x,i)=>{set('#w'+i,nf(x.w*100,1)+'%');
+    if(x.auto){set('#b'+i,nf(x.b,x.b<10?3:1));set('#v'+i,nf(x.v,x.v<10?3:1))}
+    const ch=(x.r-1)*100;set('#r'+i,x.ix==='FIX'?'—':`<span class="${col(ch)}">${sg(ch)}</span>`);
+    set('#m'+i,x.auto?`P${nf(pctl(x.ser),0)} · 3m ${var3m(x.ser)==null?'—':sg(var3m(x.ser))}`:'—');
+    set('#t'+i,x.ix==='FIX'?'—':brl(it.p0*x.w*x.r*.1))});
+  const pc=v=>(v-it.p0)/it.p0*100, ex=it.claim-R.devido, kp=(t,v,s,c='')=>`<div class="noprint-none bg-white dark:bg-stone-800 rounded-lg p-4 border border-stone-200 dark:border-stone-700"><div class="text-sm text-stone-500 dark:text-stone-400">${t}</div><div class="num text-2xl font-bold ${c}">${v}</div><div class="text-sm num">${s}</div></div>`;
+  $('#kpis').innerHTML=kp('Preço devido pela fórmula',brl(R.devido),`${sg(pc(R.devido))} vs. atual`)+
+    kp('Pedido do fornecedor',brl(it.claim),`${sg(pc(it.claim))} vs. atual`)+
+    kp('Excesso do pedido',brl(ex),`${nf(R.devido?ex/R.devido*100:0,1)}% acima do devido`,col(ex))+
+    kp('Should cost hoje',brl(R.should),`Pedido ${it.claim>R.should?'acima':'abaixo'} em ${brl(Math.abs(it.claim-R.should))}`)+
+    kp('Sinal de mercado',sigTxt(R.sig),'Percentil de 5 anos dos índices');
+  drawChart(it,R);fichaRender(it,R);
+}
+function drawChart(it,R){const pts=[];
+  for(let t=R.bt;t<=R.now;t+=30*DAY)pts.push(t);pts.push(R.now);
+  const y=t=>it.p0*R.rows.reduce((a,x)=>a+x.w*(x.auto?valAt(x.ser,t,it.avg)/x.b:x.ix==='MAN'?x.r:1),0);
+  const line=(l,fn,c,d)=>({label:l,data:pts.map(t=>({x:t,y:fn(t)})),borderColor:c,backgroundColor:c,borderWidth:2,pointRadius:0,tension:.2,borderDash:d||[]});
+  const ds=[line('Preço pela fórmula',y,'#0f766e'),line('Preço atual do contrato',()=>it.p0,'#64748b',[6,4]),line('Pedido do fornecedor',()=>it.claim,'#dc2626',[2,3])];
+  const dark=document.documentElement.classList.contains('dark'),tc=dark?'#d6d3d1':'#44403c',gc=dark?'#44403c':'#e7e5e4';
+  if(chart){chart.data.datasets=ds;chart.options.scales.x.min=R.bt;chart.update('none');return}
+  chart=new Chart($('#chart'),{type:'line',data:{datasets:ds},options:{responsive:true,maintainAspectRatio:false,parsing:false,interaction:{mode:'nearest',intersect:false,axis:'x'},
+   scales:{x:{type:'linear',min:R.bt,ticks:{color:tc,maxTicksLimit:7,callback:v=>new Date(v).toLocaleDateString('pt-BR',{month:'short',year:'2-digit'})},grid:{color:gc}},y:{ticks:{color:tc,callback:v=>'R$ '+nf(v,2)},grid:{color:gc}}},
+   plugins:{legend:{labels:{color:tc}},tooltip:{callbacks:{title:i=>new Date(i[0].parsed.x).toLocaleDateString('pt-BR'),label:c=>`${c.dataset.label}: ${brl(c.parsed.y)}`}}}}});
+}
+function fichaRender(it,R){
+  const ex=it.claim-R.devido,top=[...R.rows].filter(x=>x.ix!=='FIX').map(x=>({n:x.n,c:x.w*(x.r-1)*100})).sort((a,b)=>Math.abs(b.c)-Math.abs(a.c)).slice(0,3);
+  const cl=['Reajuste somente pela fórmula paramétrica, com índices públicos e data-base explícita no contrato.','Reajuste bidirecional: quedas dos índices também devem ser repassadas.'];
+  if(!(it.trig>0))cl.push('Definir gatilho mínimo (por exemplo, 3%) para evitar reajustes frequentes e pequenos.');
+  if(!(it.cap>0))cl.push('Negociar teto de reajuste por período para limitar a exposição.');
+  R.rows.filter(x=>x.w>.5&&x.ix!=='FIX').forEach(x=>cl.push(`${x.n} responde por ${nf(x.w*100,0)}% do preço: exigir índice de referência auditável e publicado.`));
+  if(ex>0)cl.push(`Pedir a planilha de composição (open book): o pedido supera a fórmula em ${brl(ex)}/un.`);
+  if(R.sig!=null)cl.push(R.sig>=75?'Mercado em patamar alto: evitar travar preço longo e prever revisão trimestral.':R.sig<=25?'Janela favorável: avaliar compra antecipada ou contrato mais longo com preço travado.':'Mercado neutro: manter a janela de reajuste padrão.');
+  $('#ficha').innerHTML=`<div class="border-b border-stone-300 dark:border-stone-600 pb-2"><b class="text-lg">${it.supplier}</b> · ${new Date().toLocaleDateString('pt-BR')} · data-base ${new Date(it.base+'T12:00:00').toLocaleDateString('pt-BR')}</div>
+  <p><b>Situação.</b> Preço atual ${brl(it.p0)}. O fornecedor pede ${brl(it.claim)} (${sg((it.claim-it.p0)/it.p0*100)}). Pela fórmula, o devido é ${brl(R.devido)} (${sg((R.devido-it.p0)/it.p0*100)}), ou seja, o pedido ${ex>0?'excede':'fica abaixo d'+'o devido'} ${ex>0?'em '+brl(ex)+'/un ('+nf(ex/R.devido*100,1)+'%)':''}.</p>
+  <p><b>Should cost.</b> O custo-alvo hoje é ${brl(R.should)}; o pedido está ${it.claim>R.should?'acima':'abaixo'} em ${brl(Math.abs(it.claim-R.should))}/un.</p>
+  <p><b>Principais vetores de variação.</b> ${top.map(x=>`${x.n} (${sg(x.c)} no preço)`).join('; ')||'—'}.</p>
+  <p><b>Mercado.</b> ${sigTxt(R.sig)}.</p>
+  <div><b>Cláusulas e argumentos sugeridos</b><ul class="list-disc pl-6">${cl.map(c=>`<li>${c}</li>`).join('')}</ul></div>`;
+}
+
+/* ---------- Perfis, backup, tema ---------- */
+function profs(){$('#prof').innerHTML=Object.keys(ST.items).map(n=>`<option ${n===ST.cur?'selected':''}>${n}</option>`).join('')}
+function load(){profs();buildParams();buildTable()}
+$('#prof').onchange=e=>{ST.cur=e.target.value;save();load()};
+$('#bNew').onclick=()=>{const n=(prompt('Nome da negociação (ex.: Fornecedor X)')||'').trim();if(!n||ST.items[n])return;ST.items[n]=DEF();ST.items[n].supplier=n;ST.cur=n;save();load()};
+$('#bDel').onclick=()=>{if(!confirm('Excluir "'+ST.cur+'"?'))return;delete ST.items[ST.cur];if(!Object.keys(ST.items).length)ST.items.Exemplo=DEF();ST.cur=Object.keys(ST.items)[0];save();load()};
+$('#bAdd').onclick=()=>{IT().lines.push({n:'Nova linha',c:0,ix:'FIX'});save();buildTable()};
+$('#bExp').onclick=()=>{const a=document.createElement('a');a.href=URL.createObjectURL(new Blob([JSON.stringify(ST)],{type:'application/json'}));a.download='negociacoes-backup.json';a.click()};
+$('#bImp').onchange=async e=>{try{const j=JSON.parse(await e.target.files[0].text());if(!j.items)throw 0;Object.assign(ST.items,j.items);ST.cur=Object.keys(j.items)[0];save();load()}catch{alert('Arquivo de backup inválido.')}e.target.value=''};
+$('#bCopy').onclick=()=>navigator.clipboard.writeText($('#ficha').innerText);
+$('#bPrint').onclick=()=>print();
+function setTheme(d){document.documentElement.classList.toggle('dark',d);SV('dark',d)}
+$('#bTheme').onclick=()=>{setTheme(!document.documentElement.classList.contains('dark'));if(chart){chart.destroy();chart=null}refresh()};
+setTheme(LS('dark',matchMedia('(prefers-color-scheme: dark)').matches));
+fetch('data.json').then(r=>r.json()).then(j=>j.series.forEach(s=>{
+  if(s.unit==='%'){let a=100;s={...s,name:s.name.replace(' (mês)',' acumulado'),unit:'índice',points:s.points.map(p=>[p[0],a*=1+p[1]/100])}}
+  S[s.id]=s})).catch(()=>$('#warn').classList.remove('hidden')).finally(load);
+</script>
+</body>
+</html>
